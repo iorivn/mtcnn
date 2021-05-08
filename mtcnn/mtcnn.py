@@ -257,13 +257,15 @@ class MTCNN:
 
             reg = reg[mask]
             pro = pro[:, 1][mask]
-            p_bbs = p_bbs[mask].type(torch.float32)
-            p_idxs = p_idxs[mask]
+            b = p_bbs[mask].type(torch.float32)
+            i = p_idxs[mask]
 
-            p_bbs = self._bb_reg(p_bbs, reg)
-            nms_idxs = batched_nms(p_bbs, pro, p_idxs, self.nmsThreshold)
+            b = self._bb_reg(b, reg)
+            j = batched_nms(b, pro, i, self.nmsThreshold)
+            b = clip_boxes_to_image(b[j], size=imgs.shape[2:]).int()
+            i = i[j]
 
-            return p_bbs[nms_idxs].int(), p_idxs[nms_idxs]
+            return b, i
 
     def _third_stage(self,
                      imgs: torch.Tensor,
@@ -280,13 +282,15 @@ class MTCNN:
 
             reg = reg[mask]
             pro = pro[:, 1][mask]
-            r_bbs = r_bbs[mask].type(torch.float32)
-            r_idxs = r_idxs[mask]
+            b = r_bbs[mask].type(torch.float32)
+            i = r_idxs[mask]
 
-            r_bbs = self._bb_reg(r_bbs, reg)
-            nms_idxs = batched_nms(r_bbs, pro, r_idxs, self.nmsThreshold)
+            b = self._bb_reg(b, reg)
+            j = batched_nms(b, pro, i, self.nmsThreshold)
+            b = clip_boxes_to_image(b[j], size=imgs.shape[2:]).int()
+            i = i[j]
 
-            return r_bbs[nms_idxs].int(), r_idxs[nms_idxs], lmk[nms_idxs]
+            return b, i, lmk[j]
 
     img_t = Union[np.ndarray, torch.Tensor]
     inp_t = Union[Sequence[img_t], img_t]
@@ -312,24 +316,45 @@ class MTCNN:
         return o_bbs, o_idxs, o_lmks
 
     @staticmethod
+    def prepare_single_img(img: img_t) -> torch.Tensor:
+        """ Prepare a single image, used by `prepare_input` function.
+
+        Args:
+            img: Non-normalized RGB image, unsigned 8 bits integer
+
+        Returns:
+            Image converted to torch.Tensor type if necessary. The shape of the
+            output tensor is `[1, c, h, w]`
+        """
+        if isinstance(img, np.ndarray):
+            img = torch.tensor(img)
+
+        if img.ndim == 3:
+            img = img.unsqueeze(0)
+
+        return img
+
+    @staticmethod
     def prepare_input(imgs: inp_t,
                       device: torch.device) -> torch.Tensor:
-        if isinstance(imgs, (np.ndarray, torch.Tensor)):
-            if isinstance(imgs, np.ndarray):
-                imgs = torch.tensor(imgs, device=device)
+        """ Prepare the input to be ready for detect method.
 
-            if isinstance(imgs, torch.Tensor) and imgs.device is not device:
-                imgs = imgs.to(device)
+        Args:
+            imgs: Non-normalized RGB image(s), unsigned 8 bits integer
+            device: device where output tensor is stored
 
-            if imgs.ndim == 3:
-                imgs = imgs.unsqueeze(0)
-        elif isinstance(imgs, Sequence):
-            if any(img.shape != imgs[0].shape for img in imgs):
-                raise Exception("MTCNN batch processing only compatible with equal-dimension images.")
-            imgs = np.stack([np.uint8(img) for img in imgs])
-            imgs = torch.tensor(imgs, device=device)
+        Returns:
+            Normalized, permuted, concatenated images
+        """
+        if isinstance(imgs, Sequence):
+            if any(img.shape != imgs[0].shape for img in imgs[1:]):
+                raise Exception("All images must be equal in dimensions.")
+            imgs = [MTCNN.prepare_single_img(img) for img in imgs]
+            imgs = torch.cat(imgs, dim=0)
+        else:
+            imgs = MTCNN.prepare_single_img(imgs)
 
-        imgs = imgs.permute(0, 3, 1, 2)
+        imgs = imgs.permute(0, 3, 1, 2).to(device)
         imgs = imgs / 255. - .5
         imgs = imgs.type(torch.float32)
 
