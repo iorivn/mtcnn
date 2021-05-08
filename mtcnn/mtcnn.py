@@ -11,7 +11,8 @@ class EvalScope(torch.no_grad):
     def __init__(self, model: torch.nn.Module):
         """ Sugar coat that combines `with torch.no_grad` and `model.eval()`.
 
-        :param model: model to be evaluate within the scope
+        Args:
+            model: model to be evaluate within the scope
         """
         super(EvalScope, self).__init__()
         self._model = model
@@ -344,7 +345,7 @@ class MTCNN:
             device: device where output tensor is stored
 
         Returns:
-            Normalized, permuted, concatenated images
+            Normalized, permuted, concatenated images with shape `[b, c, h, w]`
         """
         if isinstance(imgs, Sequence):
             if any(img.shape != imgs[0].shape for img in imgs[1:]):
