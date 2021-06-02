@@ -153,9 +153,9 @@ class MTCNN:
                  factor: float = 0.709,
                  minsize: int = 20,
                  nms_threshold: float = 0.5):
-        self.pNet = PNet()
-        self.rNet = RNet()
-        self.oNet = ONet()
+        self.pNet = PNet().to(device)
+        self.rNet = RNet().to(device)
+        self.oNet = ONet().to(device)
         self.pNetThreshold = threshold[0]
         self.rNetThreshold = threshold[1]
         self.oNetThreshold = threshold[2]
@@ -297,6 +297,18 @@ class MTCNN:
     inp_t = Union[Sequence[img_t], img_t]
 
     def detect(self, imgs: inp_t):
+        """ Perform detection on given image(s)
+
+        Args:
+            imgs: Single or multiple images. The image must be un-normalized,
+             and in RGB order.
+
+        Returns:
+            A tuple of three tensors:
+                (1) bounding boxes tensor
+                (2) Image index tensor
+                (3) Landmark tensors
+        """
         _imgs = self.prepare_input(imgs=imgs, device=self.device)
 
         p_bbs, p_idxs = self._first_stage(_imgs)
@@ -325,7 +337,7 @@ class MTCNN:
 
         Returns:
             Image converted to torch.Tensor type if necessary. The shape of the
-            output tensor is `[1, c, h, w]`
+            output tensor is `[1, h, w, c]`
         """
         if isinstance(img, np.ndarray):
             img = torch.tensor(img)
