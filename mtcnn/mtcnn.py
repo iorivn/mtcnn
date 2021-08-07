@@ -264,7 +264,10 @@ class MTCNN:
                             ixs: torch.Tensor,
                             size: int = 24):
         rmm = remove_small_boxes(bbs, float(size))
-        return bbs[rmm], ixs[rmm]
+        if torch.numel(rmm) > 0:
+            return bbs[rmm], ixs[rmm]
+        else:
+            return None
 
     def _second_third_dry(self,
                           mask: torch.Tensor,
@@ -291,7 +294,11 @@ class MTCNN:
                       imgs: torch.Tensor,
                       p_bbs: torch.Tensor,
                       p_idxs: torch.Tensor) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
-        bbs, ixs = self._remove_small_boxes(p_bbs, p_idxs, 48)
+        ret = self._remove_small_boxes(p_bbs, p_idxs, 48)
+        if ret is None:
+            return None
+
+        bbs, ixs = ret
         _imgs = self._gather_rois(imgs, bbs, ixs, 24)
 
         with EvalScope(self.rNet):
@@ -308,7 +315,12 @@ class MTCNN:
                      imgs: torch.Tensor,
                      r_bbs: torch.Tensor,
                      r_idxs: torch.Tensor) -> Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
-        bbs, ixs = self._remove_small_boxes(r_bbs, r_idxs, 48)
+        ret = self._remove_small_boxes(r_bbs, r_idxs, 48)
+        if ret is None:
+            return None
+
+        bbs, ixs = ret
+
         _imgs = self._gather_rois(imgs, bbs, ixs, 48)
 
         with EvalScope(self.oNet):
