@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from torch import nn
 from torch.nn import functional as _nnf
-from torchvision.ops import batched_nms, clip_boxes_to_image
+from torchvision.ops import batched_nms, clip_boxes_to_image, remove_small_boxes
 from typing import Union, Sequence, Tuple, Optional
 from pathlib import Path
 
@@ -151,7 +151,7 @@ class MTCNN:
                  threshold: Sequence[float] = (0.6, 0.7, 0.7),
                  device: torch.device = torch.device('cpu'),
                  factor: float = 0.709,
-                 minsize: int = 20,
+                 minsize: int = 48,
                  nms_threshold: float = 0.5):
         self.pNet = PNet().to(device)
         self.rNet = RNet().to(device)
@@ -186,10 +186,9 @@ class MTCNN:
         _imgs = []
         for j in range(len(idxs)):
             x1, y1, x2, y2 = bbs[j]
-            if (y2 - y1 >= size) and (x2 - x1 >= size):
-                _img = imgs[idxs[j], :, y1:y2, x1:x2].unsqueeze(0)
-                _img = _nnf.interpolate(_img, size=(size, size), mode='area')
-                _imgs.append(_img)
+            _img = imgs[idxs[j], :, y1:y2, x1:x2].unsqueeze(0)
+            _img = _nnf.interpolate(_img, size=(size, size), mode='area')
+            _imgs.append(_img)
 
         _imgs = torch.cat(_imgs)
         return _imgs
@@ -260,56 +259,68 @@ class MTCNN:
             else:
                 return None
 
+    @staticmethod
+    def _remove_small_boxes(bbs: torch.Tensor,
+                            ixs: torch.Tensor,
+                            size: int = 24):
+        rmm = remove_small_boxes(bbs, float(size))
+        return bbs[rmm], ixs[rmm]
+
+    def _second_third_dry(self,
+                          mask: torch.Tensor,
+                          reg: torch.Tensor,
+                          pro: torch.Tensor,
+                          bbs: torch.Tensor,
+                          ixs: torch.Tensor,
+                          img_size: Tuple[int, int]):
+        if not mask.any():
+            return None
+
+        reg = reg[mask]
+        pro = pro[:, 1][mask]
+        b = bbs[mask].type(torch.float32)
+        i = ixs[mask]
+
+        b = self._bb_reg(b, reg)
+        j = batched_nms(b, pro, i, self.nmsThreshold)
+        b = clip_boxes_to_image(b[j], size=img_size).int()
+        i = i[j]
+        return b, i, j
+
     def _second_stage(self,
                       imgs: torch.Tensor,
                       p_bbs: torch.Tensor,
                       p_idxs: torch.Tensor) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
-        _imgs = self._gather_rois(imgs, p_bbs, p_idxs, 24)
+        bbs, ixs = self._remove_small_boxes(p_bbs, p_idxs, 48)
+        _imgs = self._gather_rois(imgs, bbs, ixs, 24)
 
         with EvalScope(self.rNet):
             reg, pro = self.rNet(_imgs)
-
             mask = torch.ge(pro[:, 1], self.rNetThreshold)
-
-            if not mask.any():
+            bij = self._second_third_dry(mask, reg, pro, bbs, ixs, imgs.shape[2:])
+            if bij is not None:
+                b, i, _ = bij
+                return b, i
+            else:
                 return None
-
-            reg = reg[mask]
-            pro = pro[:, 1][mask]
-            b = p_bbs[mask].type(torch.float32)
-            i = p_idxs[mask]
-
-            b = self._bb_reg(b, reg)
-            j = batched_nms(b, pro, i, self.nmsThreshold)
-            b = clip_boxes_to_image(b[j], size=imgs.shape[2:]).int()
-            i = i[j]
-
-            return b, i
 
     def _third_stage(self,
                      imgs: torch.Tensor,
                      r_bbs: torch.Tensor,
                      r_idxs: torch.Tensor) -> Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
-        _imgs = self._gather_rois(imgs, r_bbs, r_idxs, 48)
+        bbs, ixs = self._remove_small_boxes(r_bbs, r_idxs, 48)
+        _imgs = self._gather_rois(imgs, bbs, ixs, 48)
 
         with EvalScope(self.oNet):
             reg, lmk, pro = self.oNet(_imgs)
             mask = torch.ge(pro[:, 1], self.oNetThreshold)
 
-            if not mask.any():
+            bij = self._second_third_dry(mask, reg, pro, bbs, ixs, imgs.shape[2:])
+            if bij is not None:
+                b, i, j = bij
+                return b, i, lmk[j]
+            else:
                 return None
-
-            reg = reg[mask]
-            pro = pro[:, 1][mask]
-            b = r_bbs[mask].type(torch.float32)
-            i = r_idxs[mask]
-
-            b = self._bb_reg(b, reg)
-            j = batched_nms(b, pro, i, self.nmsThreshold)
-            b = clip_boxes_to_image(b[j], size=imgs.shape[2:]).int()
-            i = i[j]
-
-            return b, i, lmk[j]
 
     img_t = Union[np.ndarray, torch.Tensor]
     inp_t = Union[Sequence[img_t], img_t]
