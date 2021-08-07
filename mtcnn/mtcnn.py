@@ -173,12 +173,23 @@ class MTCNN:
 
     @staticmethod
     def _gather_rois(imgs: torch.Tensor, bbs: torch.Tensor, idxs: torch.Tensor, size: int) -> torch.Tensor:
+        """ Gather ROIs from given image(s). Will ignore bounding boxes that are
+            smaller than `size`
+
+        Args:
+            imgs: Image(s) to gather ROIs from
+            bbs: Bounding boxes in format x1, y1, x2, y2
+            idxs: Index of the image that corresponding to the bb
+            size: The size of the output
+
+        """
         _imgs = []
         for j in range(len(idxs)):
             x1, y1, x2, y2 = bbs[j]
-            _img = imgs[idxs[j], :, y1:y2, x1:x2].unsqueeze(0)
-            _img = _nnf.interpolate(_img, size=(size, size), mode='area')
-            _imgs.append(_img)
+            if (y2 - y1 >= size) and (x2 - x1 >= size):
+                _img = imgs[idxs[j], :, y1:y2, x1:x2].unsqueeze(0)
+                _img = _nnf.interpolate(_img, size=(size, size), mode='area')
+                _imgs.append(_img)
 
         _imgs = torch.cat(_imgs)
         return _imgs
