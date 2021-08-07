@@ -164,6 +164,13 @@ class MTCNN:
         self.minSize = minsize
         self.nmsThreshold = nms_threshold
 
+    def eval(self) -> 'MTCNN':
+        self.pNet = self.pNet.eval()
+        self.rNet = self.rNet.eval()
+        self.oNet = self.oNet.eval()
+
+        return self
+
     @staticmethod
     def _gather_rois(imgs: torch.Tensor, bbs: torch.Tensor, idxs: torch.Tensor, size: int) -> torch.Tensor:
         _imgs = []
@@ -310,21 +317,24 @@ class MTCNN:
                 (3) Landmark tensors
         """
         _imgs = self.prepare_input(imgs=imgs, device=self.device)
+        p_out = self._first_stage(_imgs)
 
-        p_bbs, p_idxs = self._first_stage(_imgs)
-
-        if len(p_idxs) <= 0:
+        if p_out is None:
             return None
 
-        r_bbs, r_idxs = self._second_stage(_imgs, p_bbs, p_idxs)
+        p_bbs, p_idxs = p_out
+        r_out = self._second_stage(_imgs, p_bbs, p_idxs)
 
-        if len(r_idxs) <= 0:
+        if r_out is None:
             return None
 
-        o_bbs, o_idxs, o_lmks = self._third_stage(_imgs, r_bbs, r_idxs)
+        r_bbs, r_idxs = r_out
+        o_out = self._third_stage(_imgs, r_bbs, r_idxs)
 
-        if len(o_idxs) <= 0:
+        if o_out is None:
             return None
+
+        o_bbs, o_idxs, o_lmks = o_out
 
         return o_bbs, o_idxs, o_lmks
 
